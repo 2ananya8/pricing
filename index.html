@@ -792,10 +792,25 @@ function customerTotals(cust) {
 const VM={Microsoft:'ms',Google:'goog',Zoho:'zo'};
 
 function renderLineItemDisplay(item, c, isAddon, parentProduct) {
-  const skuEvent = item.eventDate || c.start;
-  const pr = proRata(item.invoiceRate, item.seats, c.start, c.end, skuEvent, c.freq);
-  const vendorPr = item.invoiceRate > 0 ? Math.round(pr.amount * (item.vendorRate / item.invoiceRate)) : 0;
   const cls = isAddon ? 'sku-addon-row' : 'sku-row';
+  let startDateHtml, invoiceHtml, vendorHtml, invoiceLbl, vendorLbl;
+  if (isAddon) {
+    const fp = addonFullPeriodAmounts(item, c.freq);
+    startDateHtml = `<div style="color:var(--tx3)">${fmtD(c.start)}</div>${item.eventDate ? `<div class="ts" style="font-size:10px;margin-top:2px">Activated: ${fmtD(item.eventDate)}</div>` : ''}`;
+    invoiceLbl = 'Period Invoice';
+    vendorLbl = 'Vendor Cost';
+    invoiceHtml = INR(fp.invoice);
+    vendorHtml = INR(fp.vendor);
+  } else {
+    const skuEvent = item.eventDate || c.start;
+    const pr = proRata(item.invoiceRate, item.seats, c.start, c.end, skuEvent, c.freq);
+    const vendorPr = item.invoiceRate > 0 ? Math.round(pr.amount * (item.vendorRate / item.invoiceRate)) : 0;
+    startDateHtml = fmtD(skuEvent);
+    invoiceLbl = 'Pro-Rata Invoice';
+    vendorLbl = 'Vendor Pro-Rata';
+    invoiceHtml = INR(pr.amount);
+    vendorHtml = INR(vendorPr);
+  }
   return`<div class="${cls}">
     <div class="sku-row-top">
       ${isAddon?'<span class="addon-badge">Addon</span>':''}
@@ -808,9 +823,9 @@ function renderLineItemDisplay(item, c, isAddon, parentProduct) {
       <div><div class="sku-lbl">Seats</div><div style="font-weight:700">${item.seats}</div></div>
       <div><div class="sku-lbl">Invoice/seat</div><div>${INR(item.invoiceRate)}</div></div>
       <div><div class="sku-lbl">Cost/seat</div><div style="color:var(--tx3)">${INR(item.vendorRate)}</div></div>
-      <div><div class="sku-lbl">Start date</div><div style="color:var(--tx3)">${fmtD(skuEvent)}</div></div>
-      <div><div class="sku-lbl">Pro-Rata Invoice</div><div style="color:var(--bl);font-weight:700">${INR(pr.amount)}</div></div>
-      <div><div class="sku-lbl">Vendor Pro-Rata</div><div style="color:#7A6000;font-weight:600">${INR(vendorPr)}</div></div>
+      <div><div class="sku-lbl">${isAddon?'License start':'Start date'}</div><div style="color:var(--tx3)">${startDateHtml}</div></div>
+      <div><div class="sku-lbl">${invoiceLbl}</div><div style="color:var(--bl);font-weight:700">${invoiceHtml}</div></div>
+      <div><div class="sku-lbl">${vendorLbl}</div><div style="color:#7A6000;font-weight:600">${vendorHtml}</div></div>
     </div>
   </div>`;
 }
@@ -841,6 +856,36 @@ function buildLineItemPreviewHTML(s, freq, start, end) {
       </div>
     </div>
     ${eventWarning}`;
+}
+
+function addonFullPeriodAmounts(item, freq) {
+  const invoice = item.invoiceRate * item.seats;
+  const vendor  = item.vendorRate  * item.seats;
+  return {
+    invoice, vendor, profit: invoice - vendor,
+    periodLabel: freq === 'Monthly' ? 'Full monthly billing' : 'Full annual billing (license-aligned)'
+  };
+}
+
+function buildAddonPreviewHTML(item, freq) {
+  if(!item.seats||!item.vendorRate||!item.invoiceRate) return `<span style="color:var(--tx3)">Enter seats and prices to see preview</span>`;
+  const sp = skuProfit(item, freq);
+  const fp = addonFullPeriodAmounts(item, freq);
+  const mcls = sp.marginPct<10?'color:var(--rd)':sp.marginPct<20?'color:var(--yw)':'color:var(--gn)';
+  const periodSuffix = freq === 'Monthly' ? '/mo' : '/yr';
+  return`
+    <div style="width:100%">
+      <div style="font-size:11px;color:var(--tx2);font-family:'JetBrains Mono',monospace;background:var(--sf2);border:1px solid var(--bd);border-radius:7px;padding:7px 10px;margin-bottom:8px">${fp.periodLabel} — aligned to customer license (no pro-rata)</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <div class="spp-item"><div class="spp-lbl">Vendor Cost/yr</div><div class="spp-val" style="color:#7A6000">${INR(sp.vendorCostAnn)}</div></div>
+        <div class="spp-item"><div class="spp-lbl">Invoice/yr</div><div class="spp-val" style="color:var(--gn)">${INR(sp.invoiceAnn)}</div></div>
+        <div class="spp-item"><div class="spp-lbl">Gross Profit/yr</div><div class="spp-val" style="${mcls}">${INR(sp.profitAnn)}</div></div>
+        <div class="spp-item"><div class="spp-lbl">Margin %</div><div class="spp-val" style="${mcls}">${PCT(sp.marginPct)}</div></div>
+        <div class="spp-item" style="background:#FFFBE6;border:1px solid #FEE000;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:#7A6000">We Pay Vendor</div><div class="spp-val" style="color:#7A6000">${INR(fp.vendor)}${periodSuffix}</div></div>
+        <div class="spp-item" style="background:var(--gn-lt);border:1px solid #A7F3D0;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:var(--gn)">We Charge Customer</div><div class="spp-val" style="color:var(--gn);font-size:15px">${INR(fp.invoice)}${periodSuffix}</div></div>
+        <div class="spp-item" style="background:var(--pu-lt);border:1px solid #C4B5FD;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:var(--pu)">Period Profit</div><div class="spp-val" style="color:var(--pu)">${INR(fp.profit)}${periodSuffix}</div></div>
+      </div>
+    </div>`;
 }
 
 // ════════════════════════════════════════════
@@ -1336,8 +1381,7 @@ function removeSKU(idx) {
 
 function addAddon(skuIdx, data) {
   if (!skuList[skuIdx].addons) skuList[skuIdx].addons = [];
-  const start = document.getElementById('f-start').value || today();
-  skuList[skuIdx].addons.push({ vendor:'', product:'', seats:'', vendorRate:'', invoiceRate:'', eventDate:start, ...data });
+  skuList[skuIdx].addons.push({ vendor:'', product:'', seats:'', vendorRate:'', invoiceRate:'', eventDate:'', ...data });
   renderSKUBuilder();
 }
 
@@ -1368,9 +1412,9 @@ function renderAddonFields(skuIdx, a, addonIdx) {
     </div>
     <div style="margin-top:10px;display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
       <div class="fi" style="flex:1;min-width:200px">
-        <label class="fl" style="color:var(--bl)">📅 Purchase / Start Date for this Addon *</label>
+        <label class="fl" style="color:var(--bl)">📅 Purchase / Start Date for this Addon (optional)</label>
         <input class="fh" type="date" value="${a.eventDate||''}" oninput="updateAddon(${skuIdx},${addonIdx},'eventDate',this.value)" style="border-color:#BFDBFE"/>
-        <span style="font-size:11px;color:var(--tx3);margin-top:3px">Date this addon was activated. Used to calculate pro-rata.</span>
+        <span style="font-size:11px;color:var(--tx3);margin-top:3px">Optional — for your records only. Billing uses the customer License Start Date.</span>
       </div>
       <div class="sku-profit-preview" id="addon-preview-${skuIdx}-${addonIdx}" style="flex:2;min-width:260px">
         <span style="color:var(--tx3)">Enter seats and prices to see preview</span>
@@ -1450,9 +1494,7 @@ function refreshAddonPreview(skuIdx, addonIdx){
   const el=document.getElementById(`addon-preview-${skuIdx}-${addonIdx}`);
   if(!el||!a) return;
   const freq=document.getElementById('f-freq').value||'Annual';
-  const start=document.getElementById('f-start').value;
-  const end=document.getElementById('f-end').value;
-  el.innerHTML = buildLineItemPreviewHTML(a, freq, start, end);
+  el.innerHTML = buildAddonPreviewHTML(a, freq);
 }
 
 // ════════════════════════════════════════════
@@ -1474,7 +1516,6 @@ function autoEnd(){
   // Default eventDate on all SKUs that don't have one yet
   skuList.forEach(s=>{
     if(!s.eventDate) s.eventDate=start;
-    (s.addons||[]).forEach(a=>{ if(!a.eventDate) a.eventDate=start; });
   });
   refreshAllSKUPreviews();
 }
@@ -1510,7 +1551,7 @@ function openEdit(id){
   skuList=JSON.parse(JSON.stringify(c.skus||[])).map(s=>({
     ...s,
     eventDate:s.eventDate||c.start||'',
-    addons:(s.addons||[]).map(a=>({...a,eventDate:a.eventDate||s.eventDate||c.start||''}))
+    addons:(s.addons||[]).map(a=>({...a}))
   }));
   if(!skuList.length) skuList=[{vendor:'',product:'',seats:'',vendorRate:'',invoiceRate:'',eventDate:c.start||'',addons:[]}];
   renderSKUBuilder();
@@ -1529,10 +1570,14 @@ async function saveRecord(){
     for(let j=0;j<(s.addons||[]).length;j++){
       const a=s.addons[j];
       if(!a.vendor||!a.product||!a.seats||!a.vendorRate||!a.invoiceRate){ toast(`SKU ${i+1}, Addon ${j+1}: fill all fields including vendor cost and invoice price`,'red'); return; }
-      if(!a.eventDate){ toast(`SKU ${i+1}, Addon ${j+1}: enter the Purchase/Start Date`,'red'); return; }
     }
   }
-  const normalizeItem = item => ({...item,seats:+item.seats,vendorRate:+item.vendorRate,invoiceRate:+item.invoiceRate,eventDate:item.eventDate});
+  const normalizeItem = item => ({...item,seats:+item.seats,vendorRate:+item.vendorRate,invoiceRate:+item.invoiceRate,eventDate:item.eventDate||''});
+  const normalizeAddon = item => {
+    const a = {...item,seats:+item.seats,vendorRate:+item.vendorRate,invoiceRate:+item.invoiceRate};
+    if(item.eventDate) a.eventDate = item.eventDate;
+    return a;
+  };
   const rec={
     id:editId||('INT-'+Date.now()),
     name, email:document.getElementById('f-email').value.trim(),
@@ -1543,7 +1588,7 @@ async function saveRecord(){
     notes:document.getElementById('f-notes').value.trim(),
     skus:skuList.map(s=>({
       ...normalizeItem(s),
-      addons:(s.addons||[]).map(normalizeItem)
+      addons:(s.addons||[]).map(normalizeAddon)
     }))
   };
   showLoader(editId?'Updating…':'Saving…');
@@ -1775,15 +1820,15 @@ function renderSCLog(){
 // EXPORT
 // ════════════════════════════════════════════
 function exportCSV(){
-  const h=['Customer ID','Customer Name','Email','Closed By','Billing Freq','Status','Line Type','Parent Product','SKU #','Vendor','Product','Seats','Vendor Cost/Seat','Invoice/Seat','Annual Vendor Cost','Annual Invoice','Gross Profit','Margin %','Start Date','License Start','License End'];
+  const h=['Customer ID','Customer Name','Email','Closed By','Billing Freq','Status','Line Type','Parent Product','SKU #','Vendor','Product','Seats','Vendor Cost/Seat','Invoice/Seat','Annual Vendor Cost','Annual Invoice','Gross Profit','Margin %','Start Date','Addon Activated','License Start','License End'];
   const rows=[];
   DB.forEach(c=>{
     (c.skus||[]).forEach((s,i)=>{
       const sp=skuProfit(s,c.freq);
-      rows.push([c.id,c.name,c.email,c.closedBy||'',c.freq,c.status,'SKU','',i+1,s.vendor,s.product,s.seats,s.vendorRate,s.invoiceRate,sp.vendorCostAnn,sp.invoiceAnn,sp.profitAnn,sp.marginPct.toFixed(1)+'%',s.eventDate||c.start,c.start,c.end].map(v=>`"${v||''}"`).join(','));
+      rows.push([c.id,c.name,c.email,c.closedBy||'',c.freq,c.status,'SKU','',i+1,s.vendor,s.product,s.seats,s.vendorRate,s.invoiceRate,sp.vendorCostAnn,sp.invoiceAnn,sp.profitAnn,sp.marginPct.toFixed(1)+'%',s.eventDate||c.start,'',c.start,c.end].map(v=>`"${v||''}"`).join(','));
       (s.addons||[]).forEach((a,j)=>{
         const ap=skuProfit(a,c.freq);
-        rows.push([c.id,c.name,c.email,c.closedBy||'',c.freq,c.status,'Addon',s.product,i+1,a.vendor,a.product,a.seats,a.vendorRate,a.invoiceRate,ap.vendorCostAnn,ap.invoiceAnn,ap.profitAnn,ap.marginPct.toFixed(1)+'%',a.eventDate||c.start,c.start,c.end].map(v=>`"${v||''}"`).join(','));
+        rows.push([c.id,c.name,c.email,c.closedBy||'',c.freq,c.status,'Addon',s.product,i+1,a.vendor,a.product,a.seats,a.vendorRate,a.invoiceRate,ap.vendorCostAnn,ap.invoiceAnn,ap.profitAnn,ap.marginPct.toFixed(1)+'%',c.start,a.eventDate||'',c.start,c.end].map(v=>`"${v||''}"`).join(','));
       });
     });
   });
