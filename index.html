@@ -238,6 +238,17 @@ tr:hover .ra{opacity:1}
 .sdiv-line{flex:1;height:1.5px;background:var(--bd)}
 .sdiv-chip{background:var(--sf2);border:1.5px solid var(--bd);border-radius:99px;padding:2px 9px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--tx3);white-space:nowrap}
 
+/* URGENT RENEWAL ALERT */
+.urgent-alert-count{display:inline-flex;align-items:center;background:var(--rd-lt);color:var(--rd);border:1px solid #FECACA;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-left:8px}
+.urgent-alert-list{max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:4px}
+.urgent-alert-row{background:#FFFAFA;border:1.5px solid #FECACA;border-left:4px solid var(--rd);border-radius:10px;padding:12px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.urgent-alert-row-main{flex:1;min-width:0}
+.urgent-alert-row-name{font-weight:700;font-size:13px;color:var(--nv)}
+.urgent-alert-row-sub{font-size:11px;color:var(--tx3);margin-top:3px;line-height:1.4}
+.urgent-alert-row-meta{font-size:11px;color:var(--tx2);font-family:'JetBrains Mono',monospace;margin-top:5px}
+.urgent-alert-row-days{font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--rd);white-space:nowrap;flex-shrink:0}
+.urgent-alert-intro{font-size:13px;color:var(--tx2);margin-bottom:14px;line-height:1.5}
+
 /* EMPTY / TOAST / LOADER */
 .empty{text-align:center;padding:44px 20px;color:var(--tx3)}
 .ei{font-size:36px;margin-bottom:8px}.et{font-size:15px;font-weight:700;color:var(--tx2);margin-bottom:3px}
@@ -680,6 +691,24 @@ tr:hover .ra{opacity:1}
     <button class="btn bp" onclick="savePOCEntry()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>Save POC Credit
     </button>
+  </div>
+</div>
+</div>
+
+<!-- URGENT RENEWAL ALERT -->
+<div class="ov" id="urgent-alert-ov" style="z-index:300">
+<div class="modal" style="max-width:560px">
+  <div class="mh">
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+      <div class="mt">Urgent Renewals</div>
+      <span class="urgent-alert-count" id="urgent-alert-count"></span>
+    </div>
+  </div>
+  <div class="urgent-alert-intro">The following licenses renew within <b>30 days</b>. Act before they lapse.</div>
+  <div class="urgent-alert-list" id="urgent-alert-list"></div>
+  <div class="mft" style="margin-top:16px">
+    <button class="btn bo" onclick="goToRenewalsFromAlert()">View Renewals</button>
+    <button class="btn bp" onclick="dismissUrgentAlert()">Got it</button>
   </div>
 </div>
 </div>
@@ -1176,6 +1205,7 @@ async function loadAll() {
   }
   hideLoader();
   renderAll();
+  showUrgentRenewalAlert();
 }
 
 // ════════════════════════════════════════════
@@ -1338,17 +1368,65 @@ function renderProfit(){
 // ════════════════════════════════════════════
 // RENEWALS
 // ════════════════════════════════════════════
-function renderRen(){
-  const allRen=[];
-  DB.forEach(c=>{
-    iterateLineItems(c,({item,skuIdx,isAddon,parentProduct})=>{
-      allRen.push({...item, custName:c.name, custId:c.id, freq:c.freq, start:c.start, end:c.end, status:c.status, isAddon, parentProduct});
+function getAllRenewalItems() {
+  const all = [];
+  DB.forEach(c => {
+    iterateLineItems(c, ({ item, skuIdx, isAddon, parentProduct }) => {
+      all.push({ ...item, custName: c.name, custId: c.id, freq: c.freq, start: c.start, end: c.end, status: c.status, isAddon, parentProduct });
     });
   });
-  allRen.sort((a,b)=>new Date(a.end)-new Date(b.end));
-  const urg=allRen.filter(r=>{const d=dToRenew(r.end);return d>=0&&d<=30;});
-  const wrn=allRen.filter(r=>{const d=dToRenew(r.end);return d>30&&d<=90;});
-  const card=(r,cls)=>{const d=dToRenew(r.end);const sub=r.isAddon?`Addon of ${r.parentProduct} · ${r.vendor} · ${r.product}`:`${r.vendor} · ${r.product}`;return`<div class="rrc ${cls}"><div class="rrc-top"><div><div class="rrc-n">${r.custName}</div><div class="rrc-v">${sub}</div></div><div class="rrc-d ${cls==='urg'?'du':'dw'}">${d}d</div></div><div class="rrc-f">Renews ${fmtD(r.end)} · Invoice ${INR(r.invoiceRate*r.seats)}${r.freq==='Monthly'?'/mo':'/yr'}</div></div>`;};
+  return all.sort((a, b) => new Date(a.end) - new Date(b.end));
+}
+
+function getUrgentRenewals() {
+  return getAllRenewalItems().filter(r => {
+    const d = dToRenew(r.end);
+    return d >= 0 && d <= 30;
+  });
+}
+
+function renewalSubLabel(r) {
+  return r.isAddon ? `Addon of ${r.parentProduct} · ${r.vendor} · ${r.product}` : `${r.vendor} · ${r.product}`;
+}
+
+function showUrgentRenewalAlert() {
+  if (sessionStorage.getItem('int_urgent_dismissed') === '1') return;
+  const urg = getUrgentRenewals();
+  if (!urg.length) return;
+  document.getElementById('urgent-alert-count').textContent = `${urg.length} urgent`;
+  document.getElementById('urgent-alert-list').innerHTML = urg.map(r => {
+    const d = dToRenew(r.end);
+    return `<div class="urgent-alert-row">
+      <div class="urgent-alert-row-main">
+        <div class="urgent-alert-row-name">${r.custName}</div>
+        <div class="urgent-alert-row-sub">${renewalSubLabel(r)}</div>
+        <div class="urgent-alert-row-meta">Renews ${fmtD(r.end)} · ${INR(r.invoiceRate * r.seats)}${r.freq === 'Monthly' ? '/mo' : '/yr'}</div>
+      </div>
+      <div class="urgent-alert-row-days">${d}d</div>
+    </div>`;
+  }).join('');
+  document.getElementById('urgent-alert-ov').classList.add('open');
+}
+
+function dismissUrgentAlert() {
+  sessionStorage.setItem('int_urgent_dismissed', '1');
+  closeModal('urgent-alert-ov');
+}
+
+function goToRenewalsFromAlert() {
+  dismissUrgentAlert();
+  const navEl = document.querySelector('.ni[onclick*="renewals"]');
+  if (navEl) nav('renewals', navEl);
+}
+
+function renderRen(){
+  const allRen = getAllRenewalItems();
+  const urg = getUrgentRenewals();
+  const wrn = allRen.filter(r => { const d = dToRenew(r.end); return d > 30 && d <= 90; });
+  const card = (r, cls) => {
+    const d = dToRenew(r.end);
+    return `<div class="rrc ${cls}"><div class="rrc-top"><div><div class="rrc-n">${r.custName}</div><div class="rrc-v">${renewalSubLabel(r)}</div></div><div class="rrc-d ${cls === 'urg' ? 'du' : 'dw'}">${d}d</div></div><div class="rrc-f">Renews ${fmtD(r.end)} · Invoice ${INR(r.invoiceRate * r.seats)}${r.freq === 'Monthly' ? '/mo' : '/yr'}</div></div>`;
+  };
   document.getElementById('urg-cards').innerHTML=urg.length?urg.map(r=>card(r,'urg')).join(''):'<div style="color:var(--tx3);font-size:13px;padding:6px">No urgent renewals 🎉</div>';
   document.getElementById('wrn-cards').innerHTML=wrn.length?wrn.map(r=>card(r,'wrn')).join(''):'<div style="color:var(--tx3);font-size:13px;padding:6px">None in this window</div>';
   document.getElementById('rtbody').innerHTML=allRen.map(r=>{
