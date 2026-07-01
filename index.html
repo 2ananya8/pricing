@@ -748,19 +748,31 @@ let POCLog  = []; // POC credits
 // ════════════════════════════════════════════
 // DATE UTILS
 // ════════════════════════════════════════════
-const today    = () => new Date().toISOString().split('T')[0];
-const dBetween = (a,b) => Math.round((new Date(b)-new Date(a))/864e5);
+function parseLocalDate(ds) {
+  if (!ds) return null;
+  const [y, m, d] = String(ds).split('T')[0].split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+const today    = () => formatLocalDate(new Date());
+const dBetween = (a,b) => Math.round((parseLocalDate(b) - parseLocalDate(a)) / 864e5);
 const dToRenew = e => dBetween(today(), e);
-const INR      = n => '₹'+Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:0,maximumFractionDigits:0});
+const round2   = n => Math.round(Number(n || 0) * 100) / 100;
+const INR      = n => '₹'+Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const PCT      = n => (Number(n||0)).toFixed(1)+'%';
-const fmtD     = s => { if(!s) return '—'; const d=new Date(s); return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); };
-const fmtMY    = s => { if(!s) return '—'; const d=new Date(s); return d.toLocaleDateString('en-IN',{month:'short',year:'numeric'}); };
+const fmtD     = s => { if(!s) return '—'; return parseLocalDate(s).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); };
+const fmtMY    = s => { if(!s) return '—'; return parseLocalDate(s).toLocaleDateString('en-IN',{month:'short',year:'numeric'}); };
 
-function daysInMonth(ds){ const d=new Date(ds); return new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); }
-function endOfMonth(ds){ const d=new Date(ds); return new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0]; }
-function addMonths(ds,n){ const d=new Date(ds); d.setMonth(d.getMonth()+n); return d.toISOString().split('T')[0]; }
-function addYears(ds,n){ const d=new Date(ds); d.setFullYear(d.getFullYear()+n); d.setDate(d.getDate()-1); return d.toISOString().split('T')[0]; }
-function startOfNextMonth(ds){ const d=new Date(ds); return new Date(d.getFullYear(),d.getMonth()+1,1).toISOString().split('T')[0]; }
+function daysInMonth(ds){ const d=parseLocalDate(ds); return new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); }
+function endOfMonth(ds){ const d=parseLocalDate(ds); return formatLocalDate(new Date(d.getFullYear(),d.getMonth()+1,0)); }
+function addMonths(ds,n){ const d=parseLocalDate(ds); d.setMonth(d.getMonth()+n); return formatLocalDate(d); }
+function addYears(ds,n){ const d=parseLocalDate(ds); d.setFullYear(d.getFullYear()+n); d.setDate(d.getDate()-1); return formatLocalDate(d); }
+function startOfNextMonth(ds){ const d=parseLocalDate(ds); return formatLocalDate(new Date(d.getFullYear(),d.getMonth()+1,1)); }
 
 // ════════════════════════════════════════════
 // PROFIT ENGINE
@@ -770,9 +782,9 @@ function startOfNextMonth(ds){ const d=new Date(ds); return new Date(d.getFullYe
 // invoiceRate = what INT charges the customer per seat
 function skuProfit(sku, freq) {
   const f = freq || sku.freq || 'Annual';
-  const vendorCostAnn  = sku.vendorRate  * sku.seats * (f==='Monthly'?12:1);
-  const invoiceAnn     = sku.invoiceRate * sku.seats * (f==='Monthly'?12:1);
-  const profitAnn      = invoiceAnn - vendorCostAnn;
+  const vendorCostAnn  = round2(sku.vendorRate  * sku.seats * (f==='Monthly'?12:1));
+  const invoiceAnn     = round2(sku.invoiceRate * sku.seats * (f==='Monthly'?12:1));
+  const profitAnn      = round2(invoiceAnn - vendorCostAnn);
   const marginPct      = invoiceAnn > 0 ? (profitAnn / invoiceAnn * 100) : 0;
   return { vendorCostAnn, invoiceAnn, profitAnn, marginPct };
 }
@@ -813,9 +825,9 @@ function customerTotals(cust) {
     vendorCostAnn += p.vendorCostAnn;
     invoiceAnn    += p.invoiceAnn;
   });
-  const profitAnn = invoiceAnn - vendorCostAnn;
+  const profitAnn = round2(invoiceAnn - vendorCostAnn);
   const marginPct = invoiceAnn>0 ? (profitAnn/invoiceAnn*100) : 0;
-  return { vendorCostAnn, invoiceAnn, profitAnn, marginPct };
+  return { vendorCostAnn: round2(vendorCostAnn), invoiceAnn: round2(invoiceAnn), profitAnn, marginPct };
 }
 
 const VM={Microsoft:'ms',Google:'goog',Zoho:'zo'};
@@ -833,12 +845,12 @@ function renderLineItemDisplay(item, c, isAddon, parentProduct) {
   } else {
     const skuEvent = item.eventDate || c.start;
     const pr = proRata(item.invoiceRate, item.seats, c.start, c.end, skuEvent, c.freq);
-    const vendorPr = item.invoiceRate > 0 ? Math.round(pr.amount * (item.vendorRate / item.invoiceRate)) : 0;
+    const prV = proRata(item.vendorRate, item.seats, c.start, c.end, skuEvent, c.freq);
     startDateHtml = fmtD(skuEvent);
     invoiceLbl = 'Pro-Rata Invoice';
     vendorLbl = 'Vendor Pro-Rata';
     invoiceHtml = INR(pr.amount);
-    vendorHtml = INR(vendorPr);
+    vendorHtml = INR(prV.amount);
   }
   return`<div class="${cls}">
     <div class="sku-row-top">
@@ -865,12 +877,15 @@ function buildLineItemPreviewHTML(s, freq, start, end) {
   const sp = skuProfit(s, freq);
   const prInvoice = start&&end&&event ? proRata(s.invoiceRate, s.seats, start, end, event, freq) : null;
   const prVendor  = start&&end&&event ? proRata(s.vendorRate,  s.seats, start, end, event, freq) : null;
+  const fp = fullPeriodAmounts(s, freq);
+  const periodSuffix = freq === 'Monthly' ? '/mo' : '/yr';
   const mcls = sp.marginPct<10?'color:var(--rd)':sp.marginPct<20?'color:var(--yw)':'color:var(--gn)';
   const eventWarning = event&&end&&event>end ? `<div style="color:var(--rd);font-size:10px;margin-top:4px">⚠️ Purchase date is after license end date</div>` : '';
   const periodNote = prInvoice ? (freq==='Monthly'
     ? `Pro-rata period: <b>${fmtD(event)}</b> → <b>${fmtD(prInvoice.periodEnd)}</b> (end of month) = <b>${prInvoice.rem} of ${prInvoice.tot} days</b>`
     : `Pro-rata period: <b>${fmtD(event)}</b> → <b>${fmtD(prInvoice.periodEnd)}</b> (license end) = <b>${prInvoice.rem} of ${prInvoice.tot} days</b>`)
     : '';
+  const profitNote = freq === 'Monthly' ? ` <span style="font-size:11px;font-weight:500">(${INR(sp.profitAnn)}/yr)</span>` : '';
   return`
     <div style="width:100%">
       ${prInvoice ? `<div style="font-size:11px;color:var(--tx2);font-family:'JetBrains Mono',monospace;background:var(--sf2);border:1px solid var(--bd);border-radius:7px;padding:7px 10px;margin-bottom:8px">${periodNote}</div>` : ''}
@@ -879,19 +894,28 @@ function buildLineItemPreviewHTML(s, freq, start, end) {
         <div class="spp-item"><div class="spp-lbl">Invoice/yr</div><div class="spp-val" style="color:var(--gn)">${INR(sp.invoiceAnn)}</div></div>
         <div class="spp-item"><div class="spp-lbl">Gross Profit/yr</div><div class="spp-val" style="${mcls}">${INR(sp.profitAnn)}</div></div>
         <div class="spp-item"><div class="spp-lbl">Margin %</div><div class="spp-val" style="${mcls}">${PCT(sp.marginPct)}</div></div>
-        ${prVendor  ? `<div class="spp-item" style="background:#FFFBE6;border:1px solid #FEE000;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:#7A6000">🟡 We Pay Vendor</div><div class="spp-val" style="color:#7A6000">${INR(prVendor.amount)}</div></div>` : ''}
-        ${prInvoice ? `<div class="spp-item" style="background:var(--gn-lt);border:1px solid #A7F3D0;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:var(--gn)">🟢 We Charge Customer</div><div class="spp-val" style="color:var(--gn);font-size:15px">${INR(prInvoice.amount)}</div></div>` : ''}
-        ${prInvoice&&prVendor ? `<div class="spp-item" style="background:var(--pu-lt);border:1px solid #C4B5FD;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:var(--pu)">💜 Pro-Rata Profit</div><div class="spp-val" style="color:var(--pu)">${INR(prInvoice.amount - prVendor.amount)}</div></div>` : ''}
+        ${prVendor  ? `<div class="spp-item" style="background:#FFFBE6;border:1px solid #FEE000;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:#7A6000">🟡 We Pay Vendor</div><div class="spp-val" style="color:#7A6000">${INR(fp.vendor)}${periodSuffix}</div></div>` : ''}
+        ${prInvoice ? `<div class="spp-item" style="background:var(--gn-lt);border:1px solid #A7F3D0;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:var(--gn)">🟢 We Charge Customer</div><div class="spp-val" style="color:var(--gn);font-size:15px">${INR(fp.invoice)}${periodSuffix}</div></div>` : ''}
+        ${prInvoice&&prVendor ? `<div class="spp-item" style="background:var(--pu-lt);border:1px solid #C4B5FD;border-radius:6px;padding:4px 8px"><div class="spp-lbl" style="color:var(--pu)">💜 Pro-Rata Profit</div><div class="spp-val" style="color:var(--pu)">${INR(fp.profit)}${periodSuffix}${profitNote}</div></div>` : ''}
       </div>
     </div>
     ${eventWarning}`;
 }
 
-function addonFullPeriodAmounts(item, freq) {
-  const invoice = item.invoiceRate * item.seats;
-  const vendor  = item.vendorRate  * item.seats;
+function fullPeriodAmounts(item, freq) {
+  const invoice = round2(item.invoiceRate * item.seats);
+  const vendor  = round2(item.vendorRate  * item.seats);
   return {
-    invoice, vendor, profit: invoice - vendor,
+    invoice, vendor, profit: round2(invoice - vendor),
+    periodLabel: freq === 'Monthly' ? 'Full monthly billing' : 'Full annual billing'
+  };
+}
+
+function addonFullPeriodAmounts(item, freq) {
+  const invoice = round2(item.invoiceRate * item.seats);
+  const vendor  = round2(item.vendorRate  * item.seats);
+  return {
+    invoice, vendor, profit: round2(invoice - vendor),
     periodLabel: freq === 'Monthly' ? 'Full monthly billing' : 'Full annual billing (license-aligned)'
   };
 }
@@ -934,15 +958,15 @@ function proRata(rate, seats, cycleStart, cycleEnd, eventDate, freq) {
     const daysRemaining   = dBetween(eventDate, monthEnd) + 1; // inclusive
     const monthlyValue    = rate * seats;                       // rate is already per month
     const dailyRate       = monthlyValue / daysInThisMonth;
-    const amount          = Math.round(dailyRate * daysRemaining);
+    const amount          = round2(dailyRate * daysRemaining);
     const annualValue     = monthlyValue * 12;
     return {
       amount,
       tot:       daysInThisMonth,   // total days in that month
       rem:       daysRemaining,     // days from event to month end
-      daily:     Math.round(dailyRate * 100) / 100,
+      daily:     round2(dailyRate),
       ann:       annualValue,
-      monthly:   monthlyValue,
+      monthly:   round2(monthlyValue),
       periodEnd: monthEnd,
       label:     `${fmtD(eventDate)} → ${fmtD(monthEnd)} (end of month)`,
       freq:      'Monthly'
@@ -954,14 +978,14 @@ function proRata(rate, seats, cycleStart, cycleEnd, eventDate, freq) {
     const daysRemaining = Math.max(dBetween(eventDate, cycleEnd) + 1, 0);
     const annualValue   = rate * seats;
     const dailyRate     = annualValue / totalDays;
-    const amount        = Math.round(dailyRate * daysRemaining);
+    const amount        = round2(dailyRate * daysRemaining);
     return {
       amount,
       tot:       totalDays,         // total days in license cycle
       rem:       daysRemaining,     // days from event to cycle end
-      daily:     Math.round(dailyRate * 100) / 100,
+      daily:     round2(dailyRate),
       ann:       annualValue,
-      monthly:   Math.round(annualValue / 12),
+      monthly:   round2(annualValue / 12),
       periodEnd: cycleEnd,
       label:     `${fmtD(eventDate)} → ${fmtD(cycleEnd)} (end of cycle)`,
       freq:      'Annual'
@@ -1205,6 +1229,7 @@ async function loadAll() {
   }
   hideLoader();
   renderAll();
+  sessionStorage.removeItem('int_urgent_dismissed');
   showUrgentRenewalAlert();
 }
 
@@ -1287,7 +1312,7 @@ function renderTable(){
       <td><div class="tn">${c.name}</div><div class="ts">${c.id} · ${c.email}</div></td>
       <td><div style="display:inline-flex;align-items:center;gap:5px;background:var(--pu-lt);border:1px solid #C4B5FD;border-radius:99px;padding:3px 10px;font-size:11px;font-weight:700;color:var(--pu);font-family:'JetBrains Mono',monospace;white-space:nowrap">🏆 ${c.closedBy||'—'}</div></td>
       <td><div class="sku-list">${skuHtml}</div></td>
-      <td><div class="tv" style="font-size:15px">${INR(tot.invoiceAnn)}<span style="font-size:10px;color:var(--tx3);font-weight:400">/yr</span></div><div class="ts">${INR(Math.round(tot.invoiceAnn/12))}/mo</div></td>
+      <td><div class="tv" style="font-size:15px">${INR(tot.invoiceAnn)}<span style="font-size:10px;color:var(--tx3);font-weight:400">/yr</span></div><div class="ts">${INR(round2(tot.invoiceAnn/12))}/mo</div></td>
       <td><div class="tv" style="color:var(--tx2)">${INR(tot.vendorCostAnn)}<span style="font-size:10px;color:var(--tx3);font-weight:400">/yr</span></div></td>
       <td><div class="tgn" style="font-size:15px">${INR(tot.profitAnn)}</div><div><span class="profit-pill ${marginCls}">${PCT(tot.marginPct)}</span></div></td>
       <td><div class="rb"><div class="rb-tr"><div class="rb-fi ${bc}" style="width:${el}%"></div></div><div class="rb-n">${dtR<0?'Exp':dtR+'d'}</div></div><div class="ts">${fmtD(c.end)}</div></td>
@@ -1356,7 +1381,7 @@ function renderProfit(){
     return`<tr>
       <td><div class="tn">${c.name}</div><div class="ts">${c.email}</div><div style="margin-top:4px;font-size:11px;color:var(--pu);font-weight:600">🏆 ${c.closedBy||'—'}</div></td>
       <td style="text-align:center"><span style="background:var(--bl-lt);color:var(--bl);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace">${skuLabel}</span>${addonLines}</td>
-      <td class="tv">${INR(t.invoiceAnn)}<div class="ts">${INR(Math.round(t.invoiceAnn/12))}/mo</div></td>
+      <td class="tv">${INR(t.invoiceAnn)}<div class="ts">${INR(round2(t.invoiceAnn/12))}/mo</div></td>
       <td class="tv" style="color:var(--tx2)">${INR(t.vendorCostAnn)}</td>
       <td class="tgn" style="font-size:14px">${INR(t.profitAnn)}</td>
       <td><span class="profit-pill ${t.marginPct<10?'neg':t.marginPct<20?'low':''}">${PCT(t.marginPct)}</span></td>
@@ -1390,7 +1415,6 @@ function renewalSubLabel(r) {
 }
 
 function showUrgentRenewalAlert() {
-  if (sessionStorage.getItem('int_urgent_dismissed') === '1') return;
   const urg = getUrgentRenewals();
   if (!urg.length) return;
   document.getElementById('urgent-alert-count').textContent = `${urg.length} urgent`;
@@ -1409,12 +1433,11 @@ function showUrgentRenewalAlert() {
 }
 
 function dismissUrgentAlert() {
-  sessionStorage.setItem('int_urgent_dismissed', '1');
   closeModal('urgent-alert-ov');
 }
 
 function goToRenewalsFromAlert() {
-  dismissUrgentAlert();
+  closeModal('urgent-alert-ov');
   const navEl = document.querySelector('.ni[onclick*="renewals"]');
   if (navEl) nav('renewals', navEl);
 }
